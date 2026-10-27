@@ -44,9 +44,31 @@ services:
     # everything after "--" is passed to each epub / update run
     command: ["--", "-o", "/books/jnc", "--subfolder", "--whole", "--replace-partial"]
 
+  # sends the books to the e-reader (Syncthing-Fork on the device)
+  syncthing:
+    image: syncthing/syncthing:latest
+    container_name: syncthing
+    restart: unless-stopped
+    environment:
+      # books are written by the webhook as root
+      PUID: 0
+      PGID: 0
+    volumes:
+      - syncthing-config:/var/syncthing
+      - ${BOOKS_DIR:-/data/books}:/books
+    ports:
+      # sync protocol (direct connections from the device)
+      - "22000:22000/tcp"
+      - "22000:22000/udp"
+      # web UI only on the VPS itself: open with an SSH tunnel
+      - "127.0.0.1:8384:8384"
+    labels:
+      - traefik.enable=false
+
 volumes:
   kavita-config:
   jncep-config:
+  syncthing-config:
 
 networks:
   traefik-bridge:

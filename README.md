@@ -427,7 +427,17 @@ One-time setup:
 
 After that, to update: change the code on your PC and `git push`. Once GitHub Actions has built the image, open the stack in Portainer and use **Pull and redeploy** with **Re-pull image** enabled. Changes to `docker-compose.yml` are picked up the same way.
 
-To get the EPUBs on an e-reader automatically, sync the books folder to the device (e.g. Syncthing). Kavita also exposes an OPDS feed (User settings > OPDS).
+### E-reader (Syncthing)
+
+The stack also runs Syncthing, which sends `/books/jnc` to the e-reader (e.g. a Boox with [Syncthing-Fork](https://github.com/Catfriend1/syncthing-android)). The books land in the device storage, so the default reader app sees them, and deletions (from `--replace-partial`) are synced too.
+
+1. Open the Syncthing web UI through an SSH tunnel (it only listens on the server itself): `ssh -L 8384:localhost:8384 <server>`, then http://localhost:8384. Set a GUI user and password when prompted.
+2. Install Syncthing-Fork on the e-reader. In the server UI, **Add Remote Device** with the device ID shown in the app (or scan the server's QR code from **Actions > Show ID** in the app).
+3. In the server UI, **Add Folder**: path `/books/jnc`, **Folder Type: Send Only**, and share it with the e-reader.
+4. On the e-reader, accept the folder into e.g. `Books/JNC`, **Folder Type: Receive Only**.
+5. On a Boox: disable battery optimization for Syncthing-Fork and allow it to run in the background, otherwise it only syncs while open.
+
+Port 22000 (TCP/UDP) must be reachable for direct connections; otherwise Syncthing falls back to (slower) relays. Kavita also exposes an OPDS feed (User settings > OPDS).
 
 ## config
 
