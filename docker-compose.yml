@@ -34,7 +34,9 @@ services:
       # series folder = title without the chars forbidden in folder names
       # ("Bookworm: Hannelore" => "Bookworm Hannelore"), unless overridden in
       # folders.json
-      JNCEP_NAMEGEN: 'f:to_series>fc_rm>pn_rm>vn_rm>s_title>to_string>str_foldersafe("")'
+      # file name = volume title only, so each new part overwrites the same file
+      # and the e-reader keeps its reading progress
+      JNCEP_NAMEGEN: 'n:p_to_volume>fc_rm>pn_rm>v_title>str_filesafe|f:to_series>fc_rm>pn_rm>vn_rm>s_title>to_string>str_foldersafe("")'
       JNCEP_FOLDER_MAP: /app/folders.json
     volumes:
       - jncep-config:/config
