@@ -40,6 +40,7 @@ console = utils.getConsole()
 @options.css_option
 @options.namegen_option
 @options.replace_partial_option
+@options.folder_map_option
 @click.option(
     "-w",
     "--whole",
@@ -65,6 +66,7 @@ async def generate_epub(
     style_css_path,
     namegen_rules,
     is_replace_partial,
+    folder_map,
     is_whole_volume,
 ):
     # created by group
@@ -78,6 +80,7 @@ async def generate_epub(
         style_css_path,
         namegen_rules,
         is_replace_partial,
+        folder_map,
     )
 
     index = tryint(jnc_url_or_index)

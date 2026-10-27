@@ -37,8 +37,9 @@ EpubGenerationOptions = namedtuple(
         "style_css_path",
         "namegen_rules",
         "is_replace_partial",
+        "folder_map",
     ],
-    defaults=[False],
+    defaults=[False, None],
 )
 
 EventFeed = namedtuple(
@@ -251,7 +252,7 @@ def _delete_partial_epubs(
                 _, filename, folder = namegen.generate_names(
                     series, [volume], sub_parts, fc, gen_rules
                 )
-                subfolder = folder if epub_generation_options.is_subfolder else None
+                subfolder = _series_subfolder(series, folder, epub_generation_options)
                 filepath = _epub_filepath(epub_generation_options, subfolder, filename)
 
                 if os.path.normcase(os.path.abspath(filepath)) == new_filepath:
@@ -336,10 +337,7 @@ def _process_single_epub_content(
         series, volumes, parts, fc, gen_rules
     )
 
-    if options.is_subfolder:
-        subfolder = folder
-    else:
-        subfolder = None
+    subfolder = _series_subfolder(series, folder, options)
 
     identifier = series.raw_data.slug + str(int(time.time()))
 
@@ -363,6 +361,17 @@ def _process_single_epub_content(
     )
 
     return book_details
+
+
+def _series_subfolder(series, folder, options: EpubGenerationOptions):
+    if not options.is_subfolder:
+        return None
+    # user override (e.g. to match the folders already on an e-reader)
+    folder_map = options.folder_map or {}
+    for key in (series.raw_data.title, series.raw_data.slug):
+        if key in folder_map:
+            return folder_map[key]
+    return folder
 
 
 def is_part_final(part):

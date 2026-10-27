@@ -1,4 +1,5 @@
 import functools
+import json
 import os
 
 import click
@@ -197,6 +198,36 @@ replace_partial_option = click.option(
         "Flag to delete EPUB files previously generated for a subset of the parts "
         "of a volume, when a new EPUB with more parts of that volume is generated "
         "(e.g. 'Parts 1 to 3' is deleted when 'Parts 1 to 4' is created)"
+    ),
+)
+
+
+def _read_folder_map(ctx, param, value):
+    if not value:
+        return None
+    try:
+        with open(value, encoding="utf-8") as f:
+            folder_map = json.load(f)
+    except (OSError, ValueError) as ex:
+        raise click.BadParameter(f"Cannot read '{value}': {ex}") from ex
+    if not isinstance(folder_map, dict) or not all(
+        isinstance(v, str) for v in folder_map.values()
+    ):
+        raise click.BadParameter(
+            f"'{value}' must be a JSON object of series title (or slug) to folder"
+        )
+    return folder_map
+
+
+folder_map_option = click.option(
+    "--folder-map",
+    "folder_map",
+    type=click.Path(dir_okay=False),
+    callback=_read_folder_map,
+    envvar=f"{ENVVAR_PREFIX}FOLDER_MAP",
+    help=(
+        "JSON file mapping series titles (or slugs) to the subfolder to use for "
+        'them with --subfolder, e.g. {"The Apothecary Diaries": "Apothecary"}'
     ),
 )
 

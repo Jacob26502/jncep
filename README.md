@@ -406,6 +406,15 @@ The token must be sent in the `X-Webhook-Token` header or as `?token=` in the UR
 - `--whole` / `-w` (`epub` and `update`): When the URL is a part (or a new part is found), generate the whole volume (all its available parts).
 - `--replace-partial` (`epub` and `update`): After generating an EPUB for parts of a single volume, delete the EPUBs previously generated for a subset of those parts (e.g. `Parts 1 to 3` is deleted when `Parts 1 to 4` is created). Only files with the names `jncep` would have generated with the current naming rules are deleted.
 
+### Series folders
+
+With `--subfolder`, each series gets its own folder. To match folders that already exist elsewhere (e.g. on an e-reader):
+
+- `--folder-map` (`JNCEP_FOLDER_MAP`, for `epub` and `update`): a JSON file mapping the J-Novel Club series title (or slug) to a folder name, e.g. `{"The Apothecary Diaries": "Apothecary"}`.
+- The `str_foldersafe` naming rule only removes the characters forbidden in folder names, e.g. `-g 'f:to_series>fc_rm>pn_rm>vn_rm>s_title>to_string>str_foldersafe("")'` gives `Ascendance of a Bookworm Hannelore’s Fifth Year at the Royal Academy` for `Ascendance of a Bookworm: Hannelore’s Fifth Year at the Royal Academy`.
+
+In the Docker stack, both are set: edit `folders.json` in the repository, push, then redeploy the stack once the image is built.
+
 ### Kavita
 
 With `--kavita-url`, `--kavita-api-key` and `--kavita-folder` (or `JNCEP_KAVITA_URL`, `JNCEP_KAVITA_API_KEY`, `JNCEP_KAVITA_FOLDER`), the webhook asks a [Kavita](https://www.kavitareader.com/) server to rescan the output folder after each successful run. The API key must belong to an admin user. The folder is the output folder as seen by Kavita (e.g. `/books/jnc` in Docker) and must be inside a Kavita library.

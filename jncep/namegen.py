@@ -982,6 +982,13 @@ def str_filesafe(components: list[Component], char_replace="_", preserve_chars="
     )
 
 
+def str_foldersafe(components: list[Component], char_replace="_"):
+    # only replace the chars forbidden in folder names (keep spaces, quotes...)
+    # with char_replace="": "Bookworm: Hannelore" => "Bookworm Hannelore"
+    str_component = _find_str_component_implicit_string(components)
+    str_component.value = to_safe_foldername(str_component.value, char_replace).strip()
+
+
 # GEN_RULES_END
 
 

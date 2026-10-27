@@ -34,6 +34,7 @@ console = utils.getConsole()
 @options.css_option
 @options.namegen_option
 @options.replace_partial_option
+@options.folder_map_option
 # TODO group the update options
 @click.option(
     "-s",
@@ -124,6 +125,7 @@ async def update_tracked(
     style_css_path,
     namegen_rules,
     is_replace_partial,
+    folder_map,
     is_sync,
     is_whole_volume,
     is_whole_volume_on_final_part,
@@ -142,6 +144,7 @@ async def update_tracked(
         style_css_path,
         namegen_rules,
         is_replace_partial,
+        folder_map,
     )
 
     if is_catchup:

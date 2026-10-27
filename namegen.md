@@ -78,6 +78,7 @@ The rules are as follows (TODO document briefly):
 - str_rm_space
 - str_replace_space
 - str_filesafe
+- str_foldersafe
 - _t
 
 The rules apply to the following parts of the title, according to their prefixes:

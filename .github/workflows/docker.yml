@@ -11,6 +11,7 @@ on:
             - "jncep/**"
             - "pyproject.toml"
             - "Dockerfile"
+            - "folders.json"
             - "docker-compose.yml"
             - ".github/workflows/docker.yml"
     workflow_dispatch:

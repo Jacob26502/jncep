@@ -30,6 +30,11 @@ services:
       JNCEP_KAVITA_API_KEY: ${JNCEP_KAVITA_API_KEY:-}
       JNCEP_KAVITA_URL: http://kavita:5000
       JNCEP_KAVITA_FOLDER: /books/jnc
+      # series folder = title without the chars forbidden in folder names
+      # ("Bookworm: Hannelore" => "Bookworm Hannelore"), unless overridden in
+      # folders.json
+      JNCEP_NAMEGEN: 'f:to_series>fc_rm>pn_rm>vn_rm>s_title>to_string>str_foldersafe("")'
+      JNCEP_FOLDER_MAP: /app/folders.json
     volumes:
       - jncep-config:/config
       - ${BOOKS_DIR:-/data/books}:/books

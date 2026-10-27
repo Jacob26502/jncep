@@ -3,5 +3,6 @@
 !README.md
 !LICENSE
 !jncep/
+!folders.json
 **/__pycache__
 **/*.pyc
