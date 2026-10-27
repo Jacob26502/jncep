@@ -4,12 +4,11 @@ import logging
 import click
 import trio
 
-from .. import core, jncalts, jncapi, spec, track, update, utils
+from .. import core, jncalts, namegen, track, update, utils
 from ..config import ENVVAR_PREFIX
-from ..trio_utils import bag, coro
+from ..trio_utils import coro
 from . import options
 from .base import CatchAllExceptionsCommand
-from .epub import generate_epubs
 from .track import sync_series
 
 logger = logging.getLogger(__name__)
@@ -47,13 +46,6 @@ console = utils.getConsole()
     ),
 )
 @click.option(
-    "-z",
-    "--catchup",
-    "is_catchup",
-    is_flag=True,
-    help="Flag to obtain all the catchup series (all volumes, all series)",
-)
-@click.option(
     "-j",
     "--jnc-managed",
     "is_jnc_managed",
@@ -62,7 +54,7 @@ console = utils.getConsole()
     help=(
         "Flag to indicate whether to use the series followed on the J-Novel Club "
         "website as the tracking reference for updating (equivalent to "
-        "running 'track sync --delete --beginning' followed by 'update')"
+        "running 'track sync --delete --first-available-volume' followed by 'update')"
     ),
 )
 @click.option(
@@ -132,8 +124,8 @@ async def update_tracked(
     is_whole_volume_only,
     is_use_events,
     is_jnc_managed,
-    is_catchup,
 ):
+    name_generator = namegen.NameGenerator(namegen_rules)
     epub_generation_options = core.EpubGenerationOptions(
         output_dirpath,
         is_subfolder,
@@ -142,15 +134,10 @@ async def update_tracked(
         is_extract_content,
         is_not_replace_chars,
         style_css_path,
-        namegen_rules,
+        name_generator,
         is_replace_partial,
         folder_map,
     )
-
-    if is_catchup:
-        await _process_catchup(credentials, epub_generation_options)
-        # abort directly
-        return
 
     update_options = update.UpdateOptions(
         is_sync,
@@ -266,7 +253,7 @@ async def _process_managed(
     config, ctx, credentials, track_manager, tracked_series_origin, update_options
 ):
     # run the equivalent of:
-    # track sync --delete --beginning
+    # track sync --delete --first-available-volumeg
     # update
 
     # do the sync_series inside an existing origin session so only one login
@@ -312,47 +299,3 @@ async def _process_managed(
 
     # after that, let update run normally
     console.info("[important]update[/]")
-
-
-async def _process_catchup(credentials, epub_generation_options):
-    origins = credentials.origins_with_credentials()
-    for origin in origins:
-        alt_config = jncalts.get_alt_config_for_origin(origin)
-
-        async with core.JNCEPSession(alt_config, credentials) as session:
-            catchup_series = []
-            async for raw_series in jncapi.paginate(
-                session.api.fetch_all_series, "series"
-            ):
-                if raw_series.get("catchup"):
-                    if not core.is_novel(raw_series):
-                        continue
-                    catchup_series.append(raw_series)
-
-            if not catchup_series:
-                console.warning(f"No catchup series for {origin.DISPLAY_NAME}")
-                continue
-
-            tasks = []
-            for series in catchup_series:
-                tasks.append(
-                    partial(
-                        _generate_catchup_epubs,
-                        session,
-                        series,
-                        epub_generation_options,
-                    )
-                )
-            await bag(tasks)
-
-
-async def _generate_catchup_epubs(session, series, epub_generation_options):
-    series_id = series.id
-    series = await core.fetch_meta(session, series_id)
-
-    title = series.raw_data.title
-    console.info(f"The catchup series '[highlight]{title}[/]' will be downloaded")
-    full_series_part_spec = spec.IdentifierSpec(spec.SERIES)
-    await generate_epubs(
-        session, series, full_series_part_spec, epub_generation_options
-    )

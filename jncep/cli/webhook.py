@@ -11,7 +11,7 @@ import threading
 import time
 
 import click
-import httpx
+import httpx2
 
 from .. import jncweb, utils
 from ..config import ENVVAR_PREFIX
@@ -332,7 +332,7 @@ def _run_and_capture(args):
 def _notify_discord(webhook_url, title, description, color):
     # a failed notification must never stop the worker
     try:
-        response = httpx.post(
+        response = httpx2.post(
             webhook_url,
             json={
                 "username": "jncep",
@@ -362,7 +362,7 @@ def _scan_kavita(base_url, api_key, folder):
     # Kavita folder watching is unreliable on Docker bind mounts (esp. Windows)
     # so ask for a scan explicitly; Kavita queues it and returns immediately
     try:
-        response = httpx.post(
+        response = httpx2.post(
             f"{base_url}/api/Library/scan-folder",
             json={"apiKey": api_key, "folderPath": folder},
             timeout=30,

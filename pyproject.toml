@@ -1,10 +1,10 @@
 [project]
 name = "jncep"
-version = "52"
+dynamic = ["version"]
 description = "Command-line tool to generate EPUB files for J-Novel Club and JNC Nina pre-pub novels"
 license = "GPL-3.0-or-later"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [{ name = "Guilhem Vellut", email = "guilhem.vellut@gmail.com" }]
 keywords = ["epub", "jnc", "jnovel"]
 classifiers = [
@@ -20,21 +20,24 @@ classifiers = [
 dependencies = [
     "addict==2.4.0",
     "atomicwrites==1.4.1",
-    "attrs==25.3.0",
-    "click==8.1.8",
-    "click-option-group==0.5.6",
-    "ebooklib==0.19",
-    "exceptiongroup==1.3.0",
-    "httpx==0.28.1",
-    "lark==1.2.2",
+    "attrs==26.1.0",
+    "click==8.3.3",
+    "click-option-group==0.5.9",
+    "ebooklib==0.20",
+    "exceptiongroup==1.3.1",
+    "httpx2>=2.12.0",
+    "lark==1.3.1",
     "outcome==1.3.0.post0",
     "python-dateutil==2.9.0.post0",
-    "rich==13.9.4",
-    "trio==0.30.0",
+    "rich==15.0.0",
+    "trio==0.33.0",
 ]
 
 [dependency-groups]
-dev = ["coloredlogs>=15.0.1", "pytest~=8.0", "pytest-env~=1.1.0"]
+dev = ["coloredlogs>=15.0.1", "pytest~=9.0", "pytest-env>=1.1,<1.7"]
+
+[tool.uv]
+exclude-newer = "7 days"
 
 [project.urls]
 Homepage = "https://github.com/gvellut/jncep"
@@ -51,3 +54,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.sdist]
 include = ["jncep/"]
+
+[tool.hatch.version]
+path = "jncep/__init__.py"

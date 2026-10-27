@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import namedtuple
 from contextvars import ContextVar
 from datetime import datetime, timezone
+from enum import Enum, auto
 from functools import partial
 from html.parser import HTMLParser
 import logging
@@ -11,13 +12,14 @@ import platform
 import re
 import sys
 import time
+from typing import NamedTuple
 
 import dateutil.parser
 from dateutil.relativedelta import relativedelta
 from exceptiongroup import BaseExceptionGroup
 import trio
 
-from . import epub, jncalts, jncapi, jncweb, namegen, spec, utils
+from . import epub, jncalts, jncapi, jncweb, namegen_utils, spec, utils
 from .model import Image, Language, Part, Series, Volume
 from .trio_utils import bag
 from .utils import is_debug, to_safe_filename
@@ -35,7 +37,7 @@ EpubGenerationOptions = namedtuple(
         "is_extract_content",
         "is_not_replace_chars",
         "style_css_path",
-        "namegen_rules",
+        "name_generator",
         "is_replace_partial",
         "folder_map",
     ],
@@ -50,6 +52,66 @@ EventFeed = namedtuple(
         "first_event_date",
     ],
 )
+
+
+class MemberLevel(Enum):
+    USER = auto()  # for accounts with no subscription
+    MEMBER = auto()
+    PREMIUM_MEMBER = auto()
+
+    @staticmethod
+    def from_str(level_str: str) -> MemberLevel:
+        try:
+            return MemberLevel[level_str.upper()]
+        except KeyError:
+            console.warning(f"Unknown level : {level_str}")
+            # use that as default
+            return MemberLevel.USER
+
+
+class SubscriptionStatus(Enum):
+    ACTIVE = auto()
+    TRIALING = auto()
+    UNKNOWN = auto()  # for non members (just an account: Always with level = USER ?)
+
+    @staticmethod
+    def from_str(status_str: str) -> SubscriptionStatus:
+        try:
+            return SubscriptionStatus[status_str.upper()]
+        except KeyError:
+            console.warning(f"Unknown subscription status : {status_str}")
+            # use that as default
+            return SubscriptionStatus.UNKNOWN
+
+
+class MemberStatus(NamedTuple):
+    origin: jncalts.AltOrigin
+    name: str
+    # level and status are always filled in /me even for non members
+    level: MemberLevel
+    status: SubscriptionStatus
+    premium: bool  # should have no effect for jncep
+    club: bool  # prepubs
+    reader: bool  # reader's library
+
+    @property
+    def is_member(self):
+        return (
+            self.level != MemberLevel.USER and self.status != SubscriptionStatus.UNKNOWN
+        )
+
+    @property
+    def is_prepub(self):
+        # TODO not sure for nina if second part is necessary (not a subscriber so
+        # cannot really check if the details of subscription is returned for Nina)
+        return self.club or (
+            self.origin == jncalts.AltOrigin.JNC_NINA and self.is_member
+        )
+
+    @property
+    def is_readers_library(self):
+        # not available for Nina
+        return self.reader
 
 
 class FilePathTooLongError(Exception):
@@ -72,7 +134,9 @@ class JNCEPSession:
         self.email, self.password = credentials.get_credentials(config.ORIGIN)
 
         self.now = datetime.now(tz=timezone.utc)
+        # TODO only the member level is sufficient
         self.me = None
+        self.member_status = None
 
     async def __aenter__(self) -> JNCEPSession:
         # to handle nested sessions ie call to a cli commmand from another cli command
@@ -123,6 +187,7 @@ class JNCEPSession:
 
         # to be able to check subscription status
         self.me = await self.api.me()
+        self.member_status = member_status(self)
 
         emoji = ""
         if console.is_advanced():
@@ -139,6 +204,7 @@ class JNCEPSession:
             try:
                 console.info("Logout...")
                 self.me = None
+                self.member_status = None
                 await self.api.logout()
             except (BaseExceptionGroup, Exception) as ex:
                 logger.debug(f"Error logout: {ex}", exc_info=sys.exc_info())
@@ -225,7 +291,7 @@ def _delete_partial_epubs(
     # runs of consecutive parts of the volume included in the new EPUB
     # are computed with the same name generation rules => only files that JNCEP
     # would have generated are deleted
-    gen_rules = namegen.parse_namegen_rules(epub_generation_options.namegen_rules)
+    name_generator = epub_generation_options.name_generator
 
     # split into runs of consecutive part numbers: an old EPUB spanning a gap
     # (unavailable part) would contain a part not in the new EPUB
@@ -245,12 +311,12 @@ def _delete_partial_epubs(
                     # same content as the new EPUB
                     continue
 
-                fc = namegen.FC(
+                fc = namegen_utils.FC(
                     is_part_final(sub_parts[-1]),
                     is_volume_complete(volume, sub_parts),
                 )
-                _, filename, folder = namegen.generate_names(
-                    series, [volume], sub_parts, fc, gen_rules
+                _, filename, folder = name_generator.generate(
+                    series, [volume], sub_parts, fc
                 )
                 subfolder = _series_subfolder(series, folder, epub_generation_options)
                 filepath = _epub_filepath(epub_generation_options, subfolder, filename)
@@ -330,12 +396,10 @@ def _process_single_epub_content(
         else:
             toc = [f"Part {part.num_in_volume}" for part in parts]
 
-    gen_rules = namegen.parse_namegen_rules(options.namegen_rules)
+    name_generator = options.name_generator
     complete = len(volumes) == 1 and is_volume_complete(volumes[0], parts)
-    fc = namegen.FC(is_part_final(parts[-1]), complete)
-    title, filename, folder = namegen.generate_names(
-        series, volumes, parts, fc, gen_rules
-    )
+    fc = namegen_utils.FC(is_part_final(parts[-1]), complete)
+    title, filename, folder = name_generator.generate(series, volumes, parts, fc)
 
     subfolder = _series_subfolder(series, folder, options)
 
@@ -493,13 +557,23 @@ def _extract_author(creators, default="Unknown Author"):
 
 
 def _replace_chars(content):
+    # https://unicode.scarfboy.com/ for code
     # both the chars to replace and replacement are hardcoded
-    # U+2671 => East Syriac Cross
-    # U+25C6 => Black Diamond
-    # U+1F3F6 => Black Rosette
-    # U+25C7 => White Diamond
-    # U+2605 => Black star
-    chars_to_replace = ["\u2671", "\u25c6", "\U0001f3f6", "\u25c7", "\u2605"]
+    # TODO leave the raw unicode character copied from content instead of code?
+    # TODO make it automatic ie for all characters not in alphabet + punctuation?
+    # TODO add option to set replacement or add characters not processed
+    chars_to_replace = [
+        "\u2671",
+        "\u25c6",
+        "\U0001f3f6",
+        "\u25c7",
+        "\u2605",
+        "\u25bc",
+        "\u25b3",
+        "\u25ef",
+        "\u273d",
+        "\u2725",
+    ]
     replacement_char = "**"
     regex = "|".join(chars_to_replace)
     content = re.sub(regex, replacement_char, content)
@@ -600,10 +674,9 @@ def latest_part_from_non_available_volume(
 
 
 def is_volume_available(session, volume):
-    # all parts available
-    # TODO it might be temporary because of catchups : for now include it anyway
+    # check if all parts currently available
     parts_available = (
-        is_part_available(session.now, is_member(session), p) for p in volume.parts
+        is_part_available(session.now, session.member_status, p) for p in volume.parts
     )
     return all(parts_available)
 
@@ -674,7 +747,7 @@ async def resolve_series(session: JNCEPSession, jnc_resource):
         return series_raw_data.id
 
 
-async def fetch_meta(session, series_id_or_slug):
+async def fetch_meta(session: JNCEPSession, series_id_or_slug):
     series_agg = await session.api.fetch_data("series", series_id_or_slug, "aggregate")
     series_raw_data = series_agg.series
     series_id = series_raw_data.id
@@ -739,7 +812,7 @@ async def fetch_content(session, parts):
     return parts_content
 
 
-def is_part_available(now, is_member, part):
+def is_part_available(now, member_status: MemberStatus, part: Part):
     # priority: do not take it into account
     if is_part_in_future(now, part):
         return False
@@ -751,27 +824,32 @@ def is_part_available(now, is_member, part):
     if part.volume.raw_data.owned:
         return True
 
-    # only previews are relevant for non members, if not owned
-    if not is_member and not part.raw_data.preview:
+    # only previews and owned are relevant for non members
+    if not member_status.is_member:
         return False
 
-    if part.series.raw_data.catchup:
+    if member_status.is_readers_library and part.volume.raw_data.readerStreamingEnabled:
         return True
+        # user may be both reader's library AND prepub so keep checking after
 
-    exp_date = expiration_date(part)
-    if not exp_date:
+    if not member_status.is_prepub:
+        return False
+
+    # a member with access to prepubs : check expiration date
+    exp_dt = expiration_datetime(part)
+    if not exp_dt:
         # if no publishing date (thus no expiration) : assume available
         # TODO think about it
         return True
 
-    return exp_date > now
+    return exp_dt > now
 
 
 def is_part_in_future(now, part):
     return dateutil.parser.parse(part.raw_data.launch) > now
 
 
-def expiration_date(part: Part):
+def expiration_datetime(part: Part):
     # in the v2 API : the expiration field is not always present:
     # if expired: null
     # if not expired: field present but identical to the publishing date of volume ie
@@ -783,15 +861,21 @@ def expiration_date(part: Part):
         return None
 
     pub_date = dateutil.parser.parse(pub_date_s)
-    return _compute_expiration_date(pub_date)
+    return _compute_expiration_datetime(pub_date)
 
 
-def _compute_expiration_date(pub_date):
+def _compute_expiration_datetime(pub_date):
+    # code lifted from JNC website series page:
+    # in Debugger : /_next/static/chunks/pages/series/%5Bslug%5D-539be0190514573d.js
+    # let n=e.getUTCDate(),r=e.getUTCMonth(),l=e.getUTCFullYear(),
+    # a=new Date(l,n>=9?r+1:r,15,10),s=a.getDay();return 0===s&&a.setDate(16),
+    # 6===s&&a.setDate(17),a
+    # changed function name from _date to _datetime since hours = 10 so time important
     day = pub_date.day
     month = pub_date.month
     year = pub_date.year
-    # TODO should be 10h according to the JS code
-    exp_date = datetime(year, month, 15, hour=0, tzinfo=timezone.utc)
+
+    exp_date = datetime(year, month, 15, hour=10, tzinfo=timezone.utc)
 
     if day >= 9:
         exp_date += relativedelta(months=1)
@@ -840,7 +924,7 @@ def webp_to_jpeg(img_url: str):
     return img_url.replace("/webp/", "/jpg/", 1)
 
 
-async def fetch_image(session, img_url):
+async def fetch_image(session: JNCEPSession, img_url):
     try:
         jpeg_img_url = webp_to_jpeg(img_url)
         img_bytes = await session.api.fetch_url(jpeg_img_url)
@@ -932,7 +1016,7 @@ async def fetch_cover_image_from_parts(session, parts):
     parts = [
         part
         for part in parts
-        if is_part_available(session.now, is_member(session), part)
+        if is_part_available(session.now, session.member_status, part)
     ]
     if not parts:
         return None
@@ -1221,11 +1305,32 @@ def guess_language(origin, series: Series):
     return Language.EN
 
 
-def is_member(session):
-    # TODO non paying is "USER" ; normal member is "MEMBER", what about premium?
-    # Nina doesn't have premium level membership
-    # TODO other parameters ?
-    return session.me.level != "USER" and (
-            session.me.subscriptionStatus == "ACTIVE"
-            or session.me.subscriptionStatus == "TRIALING"
+def member_status(session: JNCEPSession):
+    origin = session.origin
+
+    # non paying is USER ; normal member is MEMBER, premium is PREMIUM_MEMBER
+    # subscriptionStatus can be ACTIVE or TRIALING or UNKNOWN (for simple USER only?)
+    # the me path is not accessible if not logged in : not supported by JNCEP anyway
+    # JNC Nina doesn't have premium level membership nor reader list
+    # TODO not sure if subscriptionStatus is always null for Nina or just if status is
+    # UNKNOWN (in JNC : subscriptionStatus is null if UNKNOWN)
+    level_str = session.me.level
+    level = MemberLevel.from_str(level_str)
+    status_str = session.me.subscriptionStatus
+    status = SubscriptionStatus.from_str(status_str)
+
+    name = None
+    premium = club = reader = False
+    feats = session.me.subscriptionFeatures
+    if feats:
+        name = feats.name
+        premium = bool(feats.premium)
+        club = bool(feats.clubStreamingAccess)
+        reader = bool(feats.readerStreamingAccess)
+
+    logger.debug(
+        f"{origin=} {level_str=} {level=} {status=} {status_str=} {name=} {premium=} "
+        f"{club=} {reader=}"
     )
+
+    return MemberStatus(origin, name, level, status, premium, club, reader)

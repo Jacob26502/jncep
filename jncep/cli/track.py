@@ -10,6 +10,7 @@ from ..trio_utils import coro
 from ..utils import tryint
 from . import options
 from .base import CatchAllExceptionsCommand
+from .series import fetch_series_from_url, resolve_jnc_url_or_index
 
 logger = logging.getLogger(__name__)
 console = utils.getConsole()
@@ -40,6 +41,33 @@ def track_series():
     pass
 
 
+async def _add_track_series_logic(
+    session, jnc_url, is_beginning, is_first_available_volume
+):
+    track_manager = track.TrackConfigManager()
+    tracked_series = track_manager.read_tracked_series()
+
+    console.status("Check tracking status...")
+
+    series, jnc_resource = await fetch_series_from_url(session, jnc_url)
+
+    series_url = jncweb.url_from_series_slug(session.origin, series.raw_data.slug)
+    if series_url in tracked_series:
+        console.warning(
+            f"The series '[highlight]{series.raw_data.title}[/]' is "
+            "already tracked!"
+        )
+        return series, jnc_resource
+
+    await track.track_series(
+        session, tracked_series, series, is_beginning, is_first_available_volume
+    )
+
+    # TODO async write
+    track_manager.write_tracked_series(tracked_series)
+    return series, jnc_resource
+
+
 @track_series.command(
     name="add", help="Add a new series for tracking", cls=CatchAllExceptionsCommand
 )
@@ -58,31 +86,9 @@ async def add_track_series(
     config = jncalts.get_alt_config_for_origin(origin)
 
     async with core.JNCEPSession(config, credentials) as session:
-        # TODO async read
-        track_manager = track.TrackConfigManager()
-        tracked_series = track_manager.read_tracked_series()
-
-        console.status("Check tracking status...")
-
-        jnc_resource = jncweb.resource_from_url(jnc_url)
-        series_id = await core.resolve_series(session, jnc_resource)
-        series = await core.fetch_meta(session, series_id)
-        core.check_series_is_novel(series)
-
-        series_url = jncweb.url_from_series_slug(session.origin, series.raw_data.slug)
-        if series_url in tracked_series:
-            console.warning(
-                f"The series '[highlight]{series.raw_data.title}[/]' is "
-                "already tracked!"
-            )
-            return
-
-        await track.track_series(
-            session, tracked_series, series, is_beginning, is_first_available_volume
+        await _add_track_series_logic(
+            session, jnc_url, is_beginning, is_first_available_volume
         )
-
-        # TOO async write
-        track_manager.write_tracked_series(tracked_series)
 
 
 @track_series.command(
@@ -192,23 +198,18 @@ async def rm_track_series(jnc_url_or_index, credentials: jncalts.AltCredentials)
     track_manager = track.TrackConfigManager()
     tracked_series = track_manager.read_tracked_series()
 
-    index = tryint(jnc_url_or_index)
-    if index is not None:
-        index0 = index - 1
-        if index0 < 0 or index0 >= len(tracked_series):
-            console.warning(f"Index '{index}' is not valid! (Use 'track list')")
-            return
-        series_url_list = list(tracked_series.keys())
-        series_url = series_url_list[index0]
+    jnc_url = resolve_jnc_url_or_index(jnc_url_or_index, tracked_series)
+    if not jnc_url:
+        return
+
+    if tryint(jnc_url_or_index) is not None:
+        series_url = jnc_url
     else:
-        origin = jncalts.find_origin(jnc_url_or_index)
+        origin = jncalts.find_origin(jnc_url)
         config = jncalts.get_alt_config_for_origin(origin)
 
         async with core.JNCEPSession(config, credentials) as session:
-            console.status("Check tracking status...")
-            jnc_resource = jncweb.resource_from_url(jnc_url_or_index)
-            series_id = await core.resolve_series(session, jnc_resource)
-            series = await core.fetch_meta(session, series_id)
+            series, _ = await fetch_series_from_url(session, jnc_url)
             series_url = jncweb.url_from_series_slug(
                 session.origin, series.raw_data.slug
             )

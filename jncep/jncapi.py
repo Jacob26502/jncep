@@ -3,7 +3,7 @@ import json
 import logging
 
 from addict import Dict as Addict
-import httpx
+import httpx2
 import trio
 
 from . import utils
@@ -18,7 +18,7 @@ API_COMMON_HEADERS = {
     "content-type": "application/json",
 }
 
-logging.getLogger("httpx").disabled = True
+logging.getLogger("httpx2").disabled = True
 
 
 class InvalidCDNRequestException(Exception):
@@ -106,20 +106,44 @@ class JNC_API:
     ):
         self.config = config
 
-        timeout = httpx.Timeout(api_default_timeout, pool=None)
-        self.api_session = httpx.AsyncClient(
+        hooks = None
+        if logging.getLogger("jncep").level == logging.DEBUG:
+
+            async def log_request(request):
+                logger.debug(
+                    "HTTP Request: %s %s",
+                    request.method,
+                    request.url,
+                )
+                logger.debug(f"HTTP Request Headers: {request.headers}")
+
+            async def log_response(response):
+                logger.debug(
+                    "HTTP Response: %s %d %s",
+                    response.http_version,
+                    response.status_code,
+                    response.reason_phrase,
+                )
+                logger.debug(f"HTTP Response Headers: {response.headers}")
+
+            hooks = {"request": [log_request], "response": [log_response]}
+
+        timeout = httpx2.Timeout(api_default_timeout, pool=None)
+        self.api_session = httpx2.AsyncClient(
             base_url=config.API_URL_BASE,
-            limits=httpx.Limits(max_connections=api_connections),
+            limits=httpx2.Limits(max_connections=api_connections),
             headers=API_COMMON_HEADERS,
             timeout=timeout,
+            event_hooks=hooks,
         )
 
         # full URL always provided (CDN) so no need for base location parameter
         # also multiple URL possible
-        timeout = httpx.Timeout(cdn_default_timeout, pool=None)
-        self.cdn_session = httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=cdn_connections),
+        timeout = httpx2.Timeout(cdn_default_timeout, pool=None)
+        self.cdn_session = httpx2.AsyncClient(
+            limits=httpx2.Limits(max_connections=cdn_connections),
             timeout=timeout,
+            event_hooks=hooks,
         )
 
         self.token = None
@@ -144,7 +168,7 @@ class JNC_API:
 
     async def logout(self):
         path = f"{self.config.API_PATH_BASE}/auth/logout"
-        await self._call_labs_api_authenticated("POST", path)
+        await self._call_authenticated("POST", path)
         self.token = None
 
     async def me(self):
@@ -166,7 +190,7 @@ class JNC_API:
 
         logger.debug(f"API {self.config.ORIGIN} EMBED {path}")
 
-        r = await self._call_labs_api_authenticated("GET", path)
+        r = await self._call_authenticated("GET", path)
         return r.text
 
     @with_cache
@@ -201,54 +225,36 @@ class JNC_API:
         if skip is not None:
             params.update(skip=skip)
 
-        r = await self._call_labs_api_authenticated(
-            verb, path, params=params, body=body
-        )
+        r = await self._call_authenticated(verb, path, params=params, body=body)
 
         d = Addict(r.json())
         deep_freeze(d)
         return d
 
-    async def _call_labs_api_authenticated(
-        self, verb, path, *, headers=None, params=None, body=None, **kwargs
-    ):
-        # ~common base path + params set in caller: some calls (embed) to the Labs API
-        # do not have them
-        auth = {"Authorization": f"Bearer {self.token}"}
-        r = await self._call_authenticated(
-            self.api_session,
-            verb,
-            path,
-            auth,
-            headers=headers,
-            params=params,
-            body=body,
-            **kwargs,
-        )
-
-        return r
-
     async def _call_authenticated(
         self,
-        session,
         verb,
         path,
-        auth,
         *,
         headers=None,
         params=None,
         body=None,
         **kwargs,
     ):
+        # ~common base path + params set in caller: some calls (embed) to the Labs API
+        # do not have them
+
+        auth = {"Authorization": f"Bearer {self.token}"}
+
         if not headers:
             headers = auth
         else:
             headers = {**auth, **headers}
 
-        request = session.build_request(
+        request = self.api_session.build_request(
             verb, path, headers=headers, params=params, content=body, **kwargs
         )
-        r = await session.send(request)
+        r = await self.api_session.send(request)
         r.raise_for_status()
 
         return r
@@ -265,22 +271,20 @@ class JNC_API:
 
         logger.debug(f"FOLLOW {verb} {path}")
 
-        r = await self._call_labs_api_authenticated(verb, path)
+        r = await self._call_authenticated(verb, path)
         r.raise_for_status()
 
     @with_cache
     async def fetch_url(self, url: str):
-        if not _url_starts_with(url, self.config.CDN_IMG_URL_BASE):
-            raise InvalidCDNRequestException(
-                f"{url} doesn't start with {self.config.CDN_IMG_URL_BASE}"
-            )
-
-        # for CDN images
+        # used to access CDN images
+        # no longer check the URL domain cf CDN_IMG_URL_BASE
         logger.debug(f"IMAGE {url}")
         r = await self.cdn_session.get(url)
         r.raise_for_status()
         # should be JPEG
         # TODO check ?
+        # if code 200 and not JPEG, image will be broken or will not appear.
+        # TODO try to read and print warning?
         return r.content
 
 
