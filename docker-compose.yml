@@ -29,7 +29,7 @@ services:
       JNCEP_WEBHOOK_TOKEN: ${JNCEP_WEBHOOK_TOKEN}
       JNCEP_KAVITA_API_KEY: ${JNCEP_KAVITA_API_KEY:-}
       JNCEP_KAVITA_URL: http://kavita:5000
-      JNCEP_KAVITA_FOLDER: /books/jnc
+      JNCEP_KAVITA_FOLDER: /books/library
       JNCEP_DISCORD_WEBHOOK_URL: ${JNCEP_DISCORD_WEBHOOK_URL:-}
       # series folder = title without the chars forbidden in folder names
       # ("Bookworm: Hannelore" => "Bookworm Hannelore"), unless overridden in
@@ -48,7 +48,7 @@ services:
       # Traefik exposes containers by default: keep the webhook internal
       - traefik.enable=false
     # everything after "--" is passed to each epub / update run
-    command: ["--", "-o", "/books/jnc", "--subfolder", "--whole", "--replace-partial"]
+    command: ["--", "-o", "/books/library", "--subfolder", "--whole", "--replace-partial"]
 
   # sends the books to the e-reader (Syncthing-Fork on the device)
   syncthing:

@@ -93,7 +93,7 @@ DISCORD_COLOR_ERROR = 0xE74C3C
     "--kavita-folder",
     envvar=f"{ENVVAR_PREFIX}KAVITA_FOLDER",
     help=(
-        "Output folder as seen by Kavita (e.g. /books/jnc inside Docker); "
+        "Output folder as seen by Kavita (e.g. /books/library inside Docker); "
         "must be inside one of the Kavita library folders"
     ),
 )

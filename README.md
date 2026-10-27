@@ -427,7 +427,7 @@ In the Docker stack, both are set: edit `folders.json` in the repository, push, 
 
 ### Kavita
 
-With `--kavita-url`, `--kavita-api-key` and `--kavita-folder` (or `JNCEP_KAVITA_URL`, `JNCEP_KAVITA_API_KEY`, `JNCEP_KAVITA_FOLDER`), the webhook asks a [Kavita](https://www.kavitareader.com/) server to rescan the output folder after each successful run. The API key must belong to an admin user. The folder is the output folder as seen by Kavita (e.g. `/books/jnc` in Docker) and must be inside a Kavita library.
+With `--kavita-url`, `--kavita-api-key` and `--kavita-folder` (or `JNCEP_KAVITA_URL`, `JNCEP_KAVITA_API_KEY`, `JNCEP_KAVITA_FOLDER`), the webhook asks a [Kavita](https://www.kavitareader.com/) server to rescan the output folder after each successful run. The API key must belong to an admin user. The folder is the output folder as seen by Kavita (e.g. `/books/library` in Docker) and must be inside a Kavita library.
 
 ### Discord
 
@@ -444,7 +444,7 @@ One-time setup:
     - Repository URL: `https://github.com/Jacob26502/jncep`, reference `refs/heads/master`, compose path `docker-compose.yml`
     - Environment variables: load `.env.example` and fill in the values
     - Deploy the stack.
-3. Open Kavita (`KAVITA_HOST`), create the admin user and a **Book** library on the folder `/books/jnc`.
+3. Open Kavita (`KAVITA_HOST`), create the admin user and a **Book** library on the folder `/books/library`.
 4. Copy the admin API key (User settings > 3rd Party Clients) into `JNCEP_KAVITA_API_KEY` in the stack environment variables, then **Update the stack**.
 5. In Activepieces, send `POST http://jncep-webhook:8765/` with the `X-Webhook-Token` header and the body `{"url": "<RSS item link>"}` (the webhook is only reachable from containers on `traefik-bridge`).
 
@@ -452,11 +452,11 @@ After that, to update: change the code on your PC and `git push`. Once GitHub Ac
 
 ### E-reader (Syncthing)
 
-The stack also runs Syncthing, which sends `/books/jnc` to the e-reader (e.g. a Boox with [Syncthing-Fork](https://github.com/Catfriend1/syncthing-android)). The books land in the device storage, so the default reader app sees them, and deletions (from `--replace-partial`) are synced too.
+The stack also runs Syncthing, which sends `/books/library` to the e-reader (e.g. a Boox with [Syncthing-Fork](https://github.com/Catfriend1/syncthing-android)). The books land in the device storage, so the default reader app sees them, and deletions (from `--replace-partial`) are synced too.
 
 1. Open the Syncthing web UI through an SSH tunnel (it only listens on the server itself): `ssh -L 8384:localhost:8384 <server>`, then http://localhost:8384. Set a GUI user and password when prompted.
 2. Install Syncthing-Fork on the e-reader. In the server UI, **Add Remote Device** with the device ID shown in the app (or scan the server's QR code from **Actions > Show ID** in the app).
-3. In the server UI, **Add Folder**: path `/books/jnc`, **Folder Type: Send Only**, and share it with the e-reader.
+3. In the server UI, **Add Folder**: path `/books/library`, **Folder Type: Send Only**, and share it with the e-reader.
 4. On the e-reader, accept the folder into e.g. `Books/JNC`, **Folder Type: Receive Only**.
 5. On a Boox: disable battery optimization for Syncthing-Fork and allow it to run in the background, otherwise it only syncs while open.
 
