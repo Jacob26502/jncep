@@ -1,5 +1,6 @@
 from collections import deque
 from datetime import timezone
+import html
 import inspect
 import logging
 from pathlib import Path
@@ -261,53 +262,106 @@ def getConsole():
     return ROOT_CONSOLE
 
 
-def split_by_chapter(content):
+def split_by_chapter(content, cover_filename=None):
+    # Returns (contents, titles) with one entry per <h1> chapter, or None if the
+    # parts have no <h1> at all (caller should then keep one entry per part)
     combined_content = ""
     chapter_titles = []
     first_before_content = ""
-    first_inside_content = ""
     first_after_content = ""
-    main_div_pattern = r'^(.*?)<div class="main">(.*?)</div>(.*?)$'
-    h1_title_pattern = r'<h1[^>]*>(.*?)</h1>'
+    h1_title_pattern = r"<h1[^>]*>(.*?)</h1>"
     returned_content = []
+    title_counts = {}
 
-    for i, c in enumerate(content):  #iterate over each part
-        reconstructed_content = ""
-        match = re.search(main_div_pattern, c, re.DOTALL)  # Separate out the main content from the rest
-        if match:
-            # Extract the content before, inside, and after the first <div class="main">
-            before_content = match.group(1).strip()
-            inside_content = match.group(2).strip()
-            after_content = match.group(3).strip()
-            combined_content += inside_content.strip()
-            if i == 0:
-                first_before_content = before_content
-                first_after_content = after_content
+    for i, c in enumerate(content):  # iterate over each part
+        # Separate out the main content from the rest
+        before_content, inside_content, after_content = _split_main_div(c)
+        combined_content += inside_content.strip()
+        if i == 0:
+            first_before_content = before_content.strip()
+            first_after_content = after_content.strip()
 
-    #print(combined_content)
+    # split the combined text into chapters
+    parts = re.split(r"(?=<h1[^>]*>)", combined_content, flags=re.DOTALL)
+    if not any(re.match(r"<h1[^>]*>", part) for part in parts):
+        logger.debug("No <h1> found: keeping the parts as chapters")
+        return None
 
-    parts = re.split(r"(?=<h1[^>]*>)", combined_content, flags=re.DOTALL)  # split the combined text into chapters
+    for part in parts:
+        # Find the title in the chapter
+        titles = re.findall(h1_title_pattern, part, re.DOTALL)
 
-    for i, part in enumerate(parts):
-        if part.strip():  # Ignore empty parts
-            titles = re.findall(h1_title_pattern, part)  # Find the title in the chapter
-
-            if is_cover_chapter(part):
-                title = "Cover"
-            elif len(titles) > 0:
-                title = titles[0]
+        if len(titles) > 0:
+            title = _heading_text(titles[0])
+        else:
+            # Only the text before the first <h1> has no title. At the start of a
+            # volume, it holds the cover (already in the EPUB as its own page) and
+            # sometimes color illustrations
+            if cover_filename:
+                cover_img_pattern = (
+                    rf"<img\b[^>]*\bsrc=[\"']{re.escape(cover_filename)}[\"'][^>]*>"
+                )
+                part = re.sub(cover_img_pattern, "", part)
+            if re.sub(r"<[^>]+>", "", part).strip():
+                # download starts in the middle of a chapter
+                title = "Continued from previous part"
+            elif "<img" in part:
+                title = "Illustrations"
             else:
-                print("untitled chapter found")  # Untitled Chapters are just labelled incrementally
-                title = f"Incomplete Chapter {i + 1}"
-            chapter_titles.append(title)
-            reconstructed_content = re.sub(r'<title>.*?</title>', f'<title>{title}</title>',
-                                           first_before_content) + part + first_after_content
-            returned_content.append(reconstructed_content)
+                continue
+
+        # some sections repeat (ex: Q&A at the end of each part of a fanbook)
+        title_counts[title] = title_counts.get(title, 0) + 1
+        if title_counts[title] > 1:
+            title = f"{title} ({title_counts[title]})"
+
+        chapter_titles.append(title)
+        reconstructed_content = (
+            re.sub(
+                r"<title>.*?</title>",
+                lambda _: f"<title>{html.escape(title)}</title>",
+                first_before_content,
+                flags=re.DOTALL,
+            )
+            + part
+            + first_after_content
+        )
+        returned_content.append(reconstructed_content)
     return returned_content, chapter_titles
 
 
-def is_cover_chapter(part):
-    cover_h1_pattern = r'<img[^>]*\bcover\b[^>]*>'
-    if re.search(cover_h1_pattern, part) is not None:
-        print("cover found")
-        return True
+def _heading_text(heading_html):
+    # h1 can contain markup (em, br...) and entities (&amp;): the TOC needs plain
+    # text. A <br/> separates a title from its subtitle
+    text = re.sub(r"<br\s*/?>", ": ", heading_html)
+    text = html.unescape(re.sub(r"<[^>]+>", "", text))
+    return re.sub(r"\s+", " ", text).strip(" :")
+
+
+def _split_main_div(c):
+    # Returns (before, inside, after) for the <div class="main"> of a part.
+    # The closing tag is found by counting nested divs: a non-greedy regex would
+    # stop at the first </div> and drop the rest of the part.
+    start = re.search(r"<div[^>]*\bclass=[\"'][^\"']*\bmain\b[^\"']*[\"'][^>]*>", c)
+    if start is None:
+        # no main div: keep the whole body rather than dropping the part
+        logger.warning("Part without <div class=\"main\">: using whole body")
+        body = re.search(r"^(.*?<body[^>]*>)(.*)(</body>.*)$", c, re.DOTALL)
+        if body is None:
+            return "", c, ""
+        return body.group(1), body.group(2), body.group(3)
+
+    depth = 1
+    for tag in re.finditer(r"<(/?)div\b[^>]*>", c[start.end() :], re.IGNORECASE):
+        if tag.group(0).endswith("/>"):
+            continue
+        depth += -1 if tag.group(1) else 1
+        if depth == 0:
+            inside_end = start.end() + tag.start()
+            after_start = start.end() + tag.end()
+            return c[: start.start()], c[start.end() : inside_end], c[after_start:]
+
+    # unclosed main div: everything after it is the content
+    logger.warning("Unclosed <div class=\"main\">: using rest of part")
+    return c[: start.start()], c[start.end() :], ""
+

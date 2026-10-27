@@ -58,9 +58,6 @@ def get_css(style_css_path):
 
 
 def output_epub(output_filepath, book_details: BookDetails, style_css_path=None):
-    # with open("output.txt", "w", encoding="utf-8") as file:
-    #     file.write(str(book_details.contents))
-    #print(book_details)
     lang = "en"
     book = epub.EpubBook()
     book.set_identifier(book_details.identifier)
@@ -140,21 +137,13 @@ def output_epub(output_filepath, book_details: BookDetails, style_css_path=None)
         book.add_item(img)
 
     chapters = []
-    new_contents, titles_list = utils.split_by_chapter(book_details.contents)
-    #print(book_details.contents)
-    #with open("output.html", "w", encoding="utf-8") as file:
-    #    file.write(str(new_contents))
-    #titles_list = ["chap"] * 100  # Array with n elements, all initialized to 0
-    print(len(new_contents))
-    print(len(titles_list))
-
-    #print(titles_list)
-    #for i, content in enumerate(book_details.contents):
+    # one EPUB chapter per <h1> instead of one per JNC part
+    split = utils.split_by_chapter(book_details.contents, cover_image_filename)
+    if split is None:
+        new_contents, titles_list = book_details.contents, book_details.toc
+    else:
+        new_contents, titles_list = split
     for i, content in enumerate(new_contents):
-
-        print(i)
-        #print(titles_list[i])
-        print("read")
         c = epub.EpubHtml(
             title=titles_list[i], file_name=f"chap_{i}.xhtml", lang=lang
         )
@@ -166,7 +155,6 @@ def output_epub(output_filepath, book_details: BookDetails, style_css_path=None)
         chapters.append(c)
 
     book.toc = chapters
-
 
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
