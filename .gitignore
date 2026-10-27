@@ -19,3 +19,8 @@ __pycache__
 pytest.ini
 /test_output
 /output_*
+/.idea
+.env
+/output.txt
+/books
+/data

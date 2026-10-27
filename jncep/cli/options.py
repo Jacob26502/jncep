@@ -188,6 +188,19 @@ subfolder_option = click.option(
 )
 
 
+replace_partial_option = click.option(
+    "--replace-partial",
+    "is_replace_partial",
+    is_flag=True,
+    envvar=f"{ENVVAR_PREFIX}REPLACE_PARTIAL",
+    help=(
+        "Flag to delete EPUB files previously generated for a subset of the parts "
+        "of a volume, when a new EPUB with more parts of that volume is generated "
+        "(e.g. 'Parts 1 to 3' is deleted when 'Parts 1 to 4' is created)"
+    ),
+)
+
+
 namegen_option = click.option(
     "-g",
     "--namegen",

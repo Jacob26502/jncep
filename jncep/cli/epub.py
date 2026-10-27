@@ -3,6 +3,7 @@ import logging
 import click
 
 from .. import core, jncalts, jncweb, spec, track, utils
+from ..config import ENVVAR_PREFIX
 from ..trio_utils import coro
 from ..utils import tryint
 from . import options
@@ -38,6 +39,18 @@ console = utils.getConsole()
 @options.no_replace_chars_option
 @options.css_option
 @options.namegen_option
+@options.replace_partial_option
+@click.option(
+    "-w",
+    "--whole",
+    "is_whole_volume",
+    is_flag=True,
+    envvar=f"{ENVVAR_PREFIX}WHOLE",
+    help=(
+        "Flag to indicate whether the whole volume (all its available parts) "
+        "should be generated when the JNOVEL_CLUB_URL argument is a part"
+    ),
+)
 @coro
 async def generate_epub(
     jnc_url_or_index,
@@ -51,6 +64,8 @@ async def generate_epub(
     is_not_replace_chars,
     style_css_path,
     namegen_rules,
+    is_replace_partial,
+    is_whole_volume,
 ):
     # created by group
     epub_generation_options = core.EpubGenerationOptions(
@@ -62,6 +77,7 @@ async def generate_epub(
         is_not_replace_chars,
         style_css_path,
         namegen_rules,
+        is_replace_partial,
     )
 
     index = tryint(jnc_url_or_index)
@@ -95,6 +111,11 @@ async def generate_epub(
             part_spec_analyzed.normalize_and_verify(series)
         else:
             part_spec_analyzed = await core.to_part_spec(series, jnc_resource)
+            if is_whole_volume and part_spec_analyzed.type_ == spec.PART:
+                console.info("Generate the whole volume of the part")
+                part_spec_analyzed = spec.IdentifierSpec(
+                    spec.VOLUME, part_spec_analyzed.volume_id
+                )
 
         await generate_epubs(
             session, series, part_spec_analyzed, epub_generation_options

@@ -7,6 +7,7 @@ from .cli.config import config_manage
 from .cli.epub import generate_epub
 from .cli.track import track_series
 from .cli.update import update_tracked
+from .cli.webhook import run_webhook
 from .config import DEFAULT_CONFIG_FILEPATH, apply_options_from_config
 from .utils import getConsole, module_info, setup_logging
 
@@ -42,6 +43,7 @@ main.add_command(generate_epub)
 main.add_command(track_series)
 main.add_command(update_tracked)
 main.add_command(config_manage)
+main.add_command(run_webhook)
 
 if __name__ == "__main__":
     main()

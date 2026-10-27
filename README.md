@@ -44,12 +44,13 @@ https://pypi.org/project/jncep/
 
 # Usage
 
-The `jncep` tool must be launched on the command-line. It has 4 commands:
+The `jncep` tool must be launched on the command-line. It has 5 commands:
 
 - [`epub`](#epub): To simply generate an EPUB file
 - [`track`](#track): To tell the tool that a series is of interest
 - [`update`](#update): To generate EPUB files for newly updated series of interest
 - [`config`](#config): To manage an optional configuration file
+- [`webhook`](#webhook): To run `epub` or `update` when an HTTP request is received (e.g. from an RSS automation)
 
 ## J-Novel Club account credentials
 
@@ -382,6 +383,53 @@ If you have a lot of followed series and update often, the flag `--use-events` c
 The `update` command can be called in the background from launchd (on macOS) or a scheduled task (on Windows) or cron (on Linux) in order to regularly download new content if available and create EPUBs (for example, once a day). 
 
 There is no notification built in the `jncep update` command but the text output can be combined with other tools to make something suitable. If there are updates, the `jncep update` command outputs something like `2 series sucessfully updated!`, which can be processed by another tool to create a notification.
+
+## webhook
+
+This command runs a small HTTP server. Each `POST` queues a run of `epub` or `update` (one at a time) and returns `202` immediately, so it can be called by an automation tool reacting to an RSS feed (Activepieces, n8n, Zapier...).
+
+```console
+jncep webhook --port 8765 --token CHANGE_ME -- -o C:/Books/JNC --subfolder --whole --replace-partial
+```
+
+Everything after `--` is passed to each `epub` / `update` run. Credentials are read from the environment, the configuration file or a `.env` file in the current folder (`--env-file`).
+
+Request body (JSON):
+
+- `url` (or `link`): A J-Novel Club URL, e.g. the link of the RSS item. Required for `epub`.
+- `command`: `epub` (default, see `--default-command`) or `update`.
+
+The token must be sent in the `X-Webhook-Token` header or as `?token=` in the URL. A `GET` returns a health check.
+
+### Options for replacing partial EPUBs
+
+- `--whole` / `-w` (`epub` and `update`): When the URL is a part (or a new part is found), generate the whole volume (all its available parts).
+- `--replace-partial` (`epub` and `update`): After generating an EPUB for parts of a single volume, delete the EPUBs previously generated for a subset of those parts (e.g. `Parts 1 to 3` is deleted when `Parts 1 to 4` is created). Only files with the names `jncep` would have generated with the current naming rules are deleted.
+
+### Kavita
+
+With `--kavita-url`, `--kavita-api-key` and `--kavita-folder` (or `JNCEP_KAVITA_URL`, `JNCEP_KAVITA_API_KEY`, `JNCEP_KAVITA_FOLDER`), the webhook asks a [Kavita](https://www.kavitareader.com/) server to rescan the output folder after each successful run. The API key must belong to an admin user. The folder is the output folder as seen by Kavita (e.g. `/books/jnc` in Docker) and must be inside a Kavita library.
+
+### Deploy on a server with Portainer
+
+`docker-compose.yml` is a Portainer stack running Kavita and the webhook with a shared books folder. It expects Traefik on the external `traefik-bridge` network. The webhook image is built by GitHub Actions (`.github/workflows/docker.yml`) and published to `ghcr.io/jacob26502/jncep`.
+
+One-time setup:
+
+1. Push to `master` once so the image is built (Actions tab). Then on GitHub, under **Packages > jncep > Package settings**, set the visibility to **Public** (or add GHCR credentials in Portainer under **Registries**).
+2. In Portainer: **Stacks > Add stack > Repository**
+    - Repository URL: `https://github.com/Jacob26502/jncep`, reference `refs/heads/master`, compose path `docker-compose.yml`
+    - Environment variables: load `.env.example` and fill in the values
+    - **GitOps updates**: enable, mechanism **Webhook**, and enable **Re-pull image**. Copy the webhook URL.
+    - Deploy the stack.
+3. On GitHub, **Settings > Secrets and variables > Actions**: add the secret `PORTAINER_WEBHOOK_URL` with the Portainer webhook URL.
+4. Open Kavita (`KAVITA_HOST`), create the admin user and a **Book** library on the folder `/books/jnc`.
+5. Copy the admin API key (User settings > 3rd Party Clients) into `JNCEP_KAVITA_API_KEY` in the stack environment variables, then **Update the stack**.
+6. In Activepieces, send `POST http://jncep-webhook:8765/` with the `X-Webhook-Token` header and the body `{"url": "<RSS item link>"}` (the webhook is only reachable from containers on `traefik-bridge`).
+
+After that, to update: change the code on your PC and `git push`. GitHub Actions builds the image and calls the Portainer webhook, which pulls the new image and redeploys the stack. Changes to `docker-compose.yml` are picked up the same way.
+
+To get the EPUBs on an e-reader automatically, sync the books folder to the device (e.g. Syncthing). Kavita also exposes an OPDS feed (User settings > OPDS).
 
 ## config
 

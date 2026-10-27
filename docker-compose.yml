@@ -1,0 +1,53 @@
+# Portainer stack (Repository): Kavita + jncep webhook sharing the same books folder.
+# Setup: see "Deploy on a server with Portainer" in README.md
+# Variables are set in the Portainer stack "Environment variables" section.
+services:
+  kavita:
+    image: jvmilazz0/kavita:latest
+    container_name: kavita
+    restart: unless-stopped
+    volumes:
+      - kavita-config:/kavita/config
+      - ${BOOKS_DIR:-/data/books}:/books
+    networks:
+      - default
+      - traefik-bridge
+    labels:
+      - traefik.http.routers.kavita.rule=Host(`${KAVITA_HOST:-kavita.rafu.moe}`)
+      - traefik.http.routers.kavita.tls=true
+      - traefik.http.services.kavita.loadbalancer.server.port=5000
+
+  jncep-webhook:
+    image: ghcr.io/jacob26502/jncep:latest
+    container_name: jncep-webhook
+    restart: unless-stopped
+    depends_on:
+      - kavita
+    environment:
+      JNCEP_EMAIL: ${JNCEP_EMAIL}
+      JNCEP_PASSWORD: ${JNCEP_PASSWORD}
+      JNCEP_WEBHOOK_TOKEN: ${JNCEP_WEBHOOK_TOKEN}
+      JNCEP_KAVITA_API_KEY: ${JNCEP_KAVITA_API_KEY:-}
+      JNCEP_KAVITA_URL: http://kavita:5000
+      JNCEP_KAVITA_FOLDER: /books/jnc
+    volumes:
+      - jncep-config:/config
+      - ${BOOKS_DIR:-/data/books}:/books
+    # no public port: Activepieces (also on traefik-bridge) calls
+    # http://jncep-webhook:8765/
+    networks:
+      - default
+      - traefik-bridge
+    labels:
+      # Traefik exposes containers by default: keep the webhook internal
+      - traefik.enable=false
+    # everything after "--" is passed to each epub / update run
+    command: ["--", "-o", "/books/jnc", "--subfolder", "--whole", "--replace-partial"]
+
+volumes:
+  kavita-config:
+  jncep-config:
+
+networks:
+  traefik-bridge:
+    external: true
