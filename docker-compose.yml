@@ -30,6 +30,7 @@ services:
       JNCEP_KAVITA_API_KEY: ${JNCEP_KAVITA_API_KEY:-}
       JNCEP_KAVITA_URL: http://kavita:5000
       JNCEP_KAVITA_FOLDER: /books/jnc
+      JNCEP_DISCORD_WEBHOOK_URL: ${JNCEP_DISCORD_WEBHOOK_URL:-}
       # series folder = title without the chars forbidden in folder names
       # ("Bookworm: Hannelore" => "Bookworm Hannelore"), unless overridden in
       # folders.json

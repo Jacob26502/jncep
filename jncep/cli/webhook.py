@@ -1,11 +1,14 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections import deque
 import json
 import logging
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
+import time
 
 import click
 import httpx
@@ -17,6 +20,16 @@ logger = logging.getLogger(__name__)
 console = utils.getConsole()
 
 ALLOWED_COMMANDS = ("epub", "update")
+
+# printed by core.create_epub for each generated file
+EPUB_GENERATED_RE = re.compile(r"EPUB generated in '(.+?)'")
+# lines of output kept to show in the Discord message when a run fails
+OUTPUT_TAIL_LINES = 20
+
+DISCORD_COLOR_INFO = 0x3498DB
+DISCORD_COLOR_SUCCESS = 0x2ECC71
+DISCORD_COLOR_WARNING = 0xF1C40F
+DISCORD_COLOR_ERROR = 0xE74C3C
 
 
 @click.command(
@@ -84,6 +97,14 @@ ALLOWED_COMMANDS = ("epub", "update")
         "must be inside one of the Kavita library folders"
     ),
 )
+@click.option(
+    "--discord-webhook-url",
+    envvar=f"{ENVVAR_PREFIX}DISCORD_WEBHOOK_URL",
+    help=(
+        "Discord webhook URL (Server settings > Integrations > Webhooks) to post "
+        "status updates of each run to"
+    ),
+)
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 def run_webhook(
     host,
@@ -94,15 +115,21 @@ def run_webhook(
     kavita_url,
     kavita_api_key,
     kavita_folder,
+    discord_webhook_url,
     extra_args,
 ):
-    # load first so the Kavita options can also come from the env file
+    # load first so the Kavita / Discord options can also come from the env file
     _load_env_file(env_file)
     kavita_url = kavita_url or os.environ.get(f"{ENVVAR_PREFIX}KAVITA_URL")
     kavita_api_key = kavita_api_key or os.environ.get(
         f"{ENVVAR_PREFIX}KAVITA_API_KEY"
     )
     kavita_folder = kavita_folder or os.environ.get(f"{ENVVAR_PREFIX}KAVITA_FOLDER")
+    discord_webhook_url = discord_webhook_url or os.environ.get(
+        f"{ENVVAR_PREFIX}DISCORD_WEBHOOK_URL"
+    )
+    if discord_webhook_url:
+        console.info("Discord status updates enabled")
 
     kavita = None
     if kavita_url:
@@ -124,7 +151,9 @@ def run_webhook(
     jobs = queue.Queue()
     # single worker so runs never overlap (they share the tracking file + output)
     worker = threading.Thread(
-        target=_worker, args=(jobs, list(extra_args), kavita), daemon=True
+        target=_worker,
+        args=(jobs, list(extra_args), kavita, discord_webhook_url),
+        daemon=True,
     )
     worker.start()
 
@@ -214,31 +243,119 @@ def _find_url(payload):
     return None
 
 
-def _worker(jobs, extra_args, kavita):
+def _worker(jobs, extra_args, kavita, discord_webhook_url):
+    def notify(title, description, color):
+        if discord_webhook_url:
+            _notify_discord(discord_webhook_url, title, description, color)
+
     while True:
         command, url = jobs.get()
         args = [sys.executable, "-m", "jncep.jncep", command, *extra_args]
         if url:
             args.append(url)
+        target = url or "all tracked series"
         # do not log the full args: extra_args may contain credentials
-        console.info(f"Run '{command}' for {url or 'all tracked series'}...")
+        console.info(f"Run '{command}' for {target}...")
+        notify(f"Started `{command}`", target, DISCORD_COLOR_INFO)
+        start = time.monotonic()
         try:
-            # subprocess: jncep commands run their own trio loop and may exit
-            # the process on error
-            result = subprocess.run(args, env=os.environ.copy())
-            if result.returncode == 0:
-                console.info(f"Done '{command}' for {url or 'all tracked series'}")
-                if kavita:
-                    _scan_kavita(*kavita)
+            returncode, epubs, tail = _run_and_capture(args)
+            elapsed = f"{time.monotonic() - start:.0f}s"
+            if returncode == 0:
+                console.info(f"Done '{command}' for {target}")
+                if epubs:
+                    files = "\n".join(f"- {os.path.basename(e)}" for e in epubs)
+                    description = f"{target}\n\n{files}"
+                else:
+                    description = f"{target}\n\nNo new EPUB generated"
+                notify(
+                    f"Done `{command}` in {elapsed}",
+                    description,
+                    DISCORD_COLOR_SUCCESS,
+                )
+                if kavita and not _scan_kavita(*kavita):
+                    notify(
+                        "Kavita scan request failed",
+                        "See the webhook logs",
+                        DISCORD_COLOR_WARNING,
+                    )
             else:
                 console.error(
-                    f"'{command}' for {url or 'all tracked series'} failed "
-                    f"(exit code {result.returncode})"
+                    f"'{command}' for {target} failed (exit code {returncode})"
+                )
+                notify(
+                    f"Failed `{command}` (exit code {returncode}) after {elapsed}",
+                    f"{target}\n```\n{tail}\n```",
+                    DISCORD_COLOR_ERROR,
                 )
         except Exception as ex:
             console.error(f"Could not run '{command}': {ex}")
+            notify(
+                f"Could not run `{command}`", f"{target}\n{ex}", DISCORD_COLOR_ERROR
+            )
         finally:
             jobs.task_done()
+
+
+def _run_and_capture(args):
+    # subprocess: jncep commands run their own trio loop and may exit the process
+    # on error. Output is echoed to the webhook logs as it comes and also parsed
+    # for the Discord status updates
+    env = os.environ.copy()
+    # rich would otherwise wrap long lines (file paths) at 80 columns in a pipe
+    env.setdefault("COLUMNS", "1000")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    epubs = []
+    tail = deque(maxlen=OUTPUT_TAIL_LINES)
+    with subprocess.Popen(
+        args,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ) as process:
+        for line in process.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            line = line.rstrip()
+            if not line:
+                continue
+            tail.append(line)
+            match = EPUB_GENERATED_RE.search(line)
+            if match:
+                epubs.append(match.group(1))
+    return process.returncode, epubs, "\n".join(tail)
+
+
+def _notify_discord(webhook_url, title, description, color):
+    # a failed notification must never stop the worker
+    try:
+        response = httpx.post(
+            webhook_url,
+            json={
+                "username": "jncep",
+                "embeds": [
+                    {
+                        "title": title[:256],
+                        # Discord limit is 4096: keep the end (the error is there)
+                        "description": _truncate_start(description, 4000),
+                        "color": color,
+                    }
+                ],
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+    except Exception as ex:
+        console.warning(f"Discord notification failed: {ex}")
+
+
+def _truncate_start(text, max_length):
+    if len(text) <= max_length:
+        return text
+    return "…" + text[-(max_length - 1) :]
 
 
 def _scan_kavita(base_url, api_key, folder):
@@ -252,8 +369,10 @@ def _scan_kavita(base_url, api_key, folder):
         )
         response.raise_for_status()
         console.info(f"Kavita scan of '{folder}' requested")
+        return True
     except Exception as ex:
         console.error(f"Kavita scan request failed: {ex}")
+        return False
 
 
 def _load_env_file(path):

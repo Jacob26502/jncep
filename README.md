@@ -419,6 +419,10 @@ In the Docker stack, both are set: edit `folders.json` in the repository, push, 
 
 With `--kavita-url`, `--kavita-api-key` and `--kavita-folder` (or `JNCEP_KAVITA_URL`, `JNCEP_KAVITA_API_KEY`, `JNCEP_KAVITA_FOLDER`), the webhook asks a [Kavita](https://www.kavitareader.com/) server to rescan the output folder after each successful run. The API key must belong to an admin user. The folder is the output folder as seen by Kavita (e.g. `/books/jnc` in Docker) and must be inside a Kavita library.
 
+### Discord
+
+With `--discord-webhook-url` (or `JNCEP_DISCORD_WEBHOOK_URL`), the webhook posts the status of each run to a Discord channel: when it starts, when it is done (with the names of the generated EPUB files), when it fails (with the end of its output) and when the Kavita scan request fails. Create the URL in Discord with Server settings > Integrations > Webhooks.
+
 ### Deploy on a server with Portainer
 
 `docker-compose.yml` is a Portainer stack running Kavita and the webhook with a shared books folder. It expects Traefik on the external `traefik-bridge` network. The webhook image is built by GitHub Actions (`.github/workflows/docker.yml`) and published to `ghcr.io/jacob26502/jncep`.
