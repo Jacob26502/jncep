@@ -1,7 +1,7 @@
 name: docker
 
-# Build the webhook image on every push to master, push it to GHCR, then ask
-# Portainer to redeploy the stack (if the PORTAINER_WEBHOOK_URL secret is set)
+# Build the webhook image on every push to master and push it to GHCR
+# (redeploy manually in Portainer with "Re-pull image")
 
 on:
     push:
@@ -54,9 +54,3 @@ jobs:
                   labels: ${{ steps.meta.outputs.labels }}
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
-
-            - name: Redeploy Portainer stack
-              env:
-                  PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
-              if: env.PORTAINER_WEBHOOK_URL != ''
-              run: curl --fail --silent --show-error -X POST "$PORTAINER_WEBHOOK_URL"

@@ -420,14 +420,12 @@ One-time setup:
 2. In Portainer: **Stacks > Add stack > Repository**
     - Repository URL: `https://github.com/Jacob26502/jncep`, reference `refs/heads/master`, compose path `docker-compose.yml`
     - Environment variables: load `.env.example` and fill in the values
-    - **GitOps updates**: enable, mechanism **Webhook**, and enable **Re-pull image**. Copy the webhook URL.
     - Deploy the stack.
-3. On GitHub, **Settings > Secrets and variables > Actions**: add the secret `PORTAINER_WEBHOOK_URL` with the Portainer webhook URL.
-4. Open Kavita (`KAVITA_HOST`), create the admin user and a **Book** library on the folder `/books/jnc`.
-5. Copy the admin API key (User settings > 3rd Party Clients) into `JNCEP_KAVITA_API_KEY` in the stack environment variables, then **Update the stack**.
-6. In Activepieces, send `POST http://jncep-webhook:8765/` with the `X-Webhook-Token` header and the body `{"url": "<RSS item link>"}` (the webhook is only reachable from containers on `traefik-bridge`).
+3. Open Kavita (`KAVITA_HOST`), create the admin user and a **Book** library on the folder `/books/jnc`.
+4. Copy the admin API key (User settings > 3rd Party Clients) into `JNCEP_KAVITA_API_KEY` in the stack environment variables, then **Update the stack**.
+5. In Activepieces, send `POST http://jncep-webhook:8765/` with the `X-Webhook-Token` header and the body `{"url": "<RSS item link>"}` (the webhook is only reachable from containers on `traefik-bridge`).
 
-After that, to update: change the code on your PC and `git push`. GitHub Actions builds the image and calls the Portainer webhook, which pulls the new image and redeploys the stack. Changes to `docker-compose.yml` are picked up the same way.
+After that, to update: change the code on your PC and `git push`. Once GitHub Actions has built the image, open the stack in Portainer and use **Pull and redeploy** with **Re-pull image** enabled. Changes to `docker-compose.yml` are picked up the same way.
 
 To get the EPUBs on an e-reader automatically, sync the books folder to the device (e.g. Syncthing). Kavita also exposes an OPDS feed (User settings > OPDS).
 
